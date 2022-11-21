@@ -8,7 +8,7 @@ SPDXVersion: SPDX-2.1
 DataLicense: CC0-1.0
 SPDXID: SPDXRef-Document
 DocumentNamespace: spdx:kernkonzept/readline-8c3e8993-3df8-4b5e-b3b0-4a1adffa90fa
-DocumentName: LICENSE.spdx
+DocumentName: readline
 
 Creator: Organization: Kernkonzept GmbH (info@kernkonzept.com)
 
