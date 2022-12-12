@@ -38,3 +38,5 @@ SRC_C_libreadline.a		=	readline.c 	funmap.c 	keymaps.c \
 							search.c	replacements.c
 
 include $(L4DIR)/mk/lib.mk
+
+CFLAGS += -Wno-error=implicit-function-declaration
