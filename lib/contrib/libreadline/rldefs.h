@@ -2,26 +2,24 @@
    for readline.  This should be included after any files that define
    system-specific constants like _POSIX_VERSION or USG. */
 
-/* Copyright (C) 1987,1989 Free Software Foundation, Inc.
+/* Copyright (C) 1987-2021 Free Software Foundation, Inc.
 
-   This file contains the Readline Library (the Library), a set of
-   routines for providing Emacs style line input to programs that ask
-   for it.
+   This file is part of the GNU Readline Library (Readline), a library
+   for reading lines of text with interactive input and history editing.      
 
-   The Library is free software; you can redistribute it and/or modify
+   Readline is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; either version 2, or (at your option)
-   any later version.
+   the Free Software Foundation, either version 3 of the License, or
+   (at your option) any later version.
 
-   The Library is distributed in the hope that it will be useful, but
-   WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-   General Public License for more details.
+   Readline is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-   The GNU General Public License is often shipped with GNU software, and
-   is generally kept in a file called COPYING or LICENSE.  If you do not
-   have a copy of the license, write to the Free Software Foundation,
-   59 Temple Place, Suite 330, Boston, MA 02111 USA. */
+   You should have received a copy of the GNU General Public License
+   along with Readline.  If not, see <http://www.gnu.org/licenses/>.
+*/
 
 #if !defined (_RLDEFS_H_)
 #define _RLDEFS_H_
@@ -30,13 +28,23 @@
 #  include "config.h"
 #endif
 
+#include "rlstdc.h"
+
+#if defined (STRCOLL_BROKEN)
+#  undef HAVE_STRCOLL
+#endif
+
 #if defined (_POSIX_VERSION) && !defined (TERMIOS_MISSING)
 #  define TERMIOS_TTY_DRIVER
 #else
 #  if defined (HAVE_TERMIO_H)
 #    define TERMIO_TTY_DRIVER
 #  else
-#    define NEW_TTY_DRIVER
+#    if !defined (__MINGW32__)
+#      define NEW_TTY_DRIVER
+#    else
+#      define NO_TTY_DRIVER
+#    endif
 #  endif
 #endif
 
@@ -71,13 +79,27 @@ extern char *strchr (), *strrchr ();
 #define _rl_stricmp strcasecmp
 #define _rl_strnicmp strncasecmp
 #else
-extern int _rl_stricmp (), _rl_strnicmp ();
+extern int _rl_stricmp (const char *, const char *);
+extern int _rl_strnicmp (const char *, const char *, int);
+#endif
+
+#if defined (HAVE_STRPBRK) && !defined (HAVE_MULTIBYTE)
+#  define _rl_strpbrk(a,b)	strpbrk((a),(b))
+#else
+extern char *_rl_strpbrk (const char *, const char *);
 #endif
 
 #if !defined (emacs_mode)
 #  define no_mode -1
 #  define vi_mode 0
 #  define emacs_mode 1
+#endif
+
+#if !defined (RL_IM_INSERT)
+#  define RL_IM_INSERT		1
+#  define RL_IM_OVERWRITE	0
+#
+#  define RL_IM_DEFAULT		RL_IM_INSERT
 #endif
 
 /* If you cast map[key].function to type (Keymap) on a Cray,
@@ -87,28 +109,15 @@ extern int _rl_stricmp (), _rl_strnicmp ();
    This is not what is wanted. */
 #if defined (CRAY)
 #  define FUNCTION_TO_KEYMAP(map, key)	(Keymap)((int)map[key].function)
-#  define KEYMAP_TO_FUNCTION(data)	(Function *)((int)(data))
+#  define KEYMAP_TO_FUNCTION(data)	(rl_command_func_t *)((int)(data))
 #else
 #  define FUNCTION_TO_KEYMAP(map, key)	(Keymap)(map[key].function)
-#  define KEYMAP_TO_FUNCTION(data)	(Function *)(data)
+#  define KEYMAP_TO_FUNCTION(data)	(rl_command_func_t *)(data)
 #endif
 
-extern char *xmalloc ();
-#if !defined (savestring)
-#include <stdio.h>
-static char *
-xstrdup(char *s) 
-{
-	char * cp;
-	cp = strdup(s);
-	if (cp == NULL) {
-		fprintf (stderr, "xstrdup: out of virtual memory\n"); 
-		exit (2);
-	}
-	return(cp);
-}
-#define savestring(x) xstrdup(x)
-#endif /* !savestring */
+#ifndef savestring
+#define savestring(x) strcpy ((char *)xmalloc (1 + strlen (x)), (x))
+#endif
 
 /* Possible values for _rl_bell_preference. */
 #define NO_BELL 0
@@ -125,9 +134,10 @@ xstrdup(char *s)
 /* Possible values for the found_quote flags word used by the completion
    functions.  It says what kind of (shell-like) quoting we found anywhere
    in the line. */
-#define RL_QF_SINGLE_QUOTE	0x1
-#define RL_QF_DOUBLE_QUOTE	0x2
-#define RL_QF_BACKSLASH		0x4
+#define RL_QF_SINGLE_QUOTE	0x01
+#define RL_QF_DOUBLE_QUOTE	0x02
+#define RL_QF_BACKSLASH		0x04
+#define RL_QF_OTHER_QUOTE	0x08
 
 /* Default readline line buffer length. */
 #define DEFAULT_BUFFER_SIZE 256
@@ -138,8 +148,16 @@ xstrdup(char *s)
 				    : ((a)[0] == (b)[0]) && (strncmp ((a), (b), (n)) == 0))
 #endif
 
+#if !defined (RL_STRLEN)
+#  define RL_STRLEN(s) (((s) && (s)[0]) ? ((s)[1] ? ((s)[2] ? strlen(s) : 2) : 1) : 0)
+#endif
+
 #if !defined (FREE)
 #  define FREE(x)	if (x) free (x)
+#endif
+
+#if !defined (SWAP)
+#  define SWAP(s, e)  do { int t; t = s; s = e; e = t; } while (0)
 #endif
 
 /* CONFIGURATION SECTION */

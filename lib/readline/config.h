@@ -24,7 +24,7 @@
 //#define HAVE_PUTENV 1
 
 /* Define if you have the select function.  */
-#define HAVE_SELECT 1
+//#define HAVE_SELECT 1
 
 /* Define if you have the setenv function.  */
 //#define HAVE_SETENV 1
@@ -75,6 +75,9 @@
 
 /* Define if you have the <sys/stream.h> header file.  */
 /* #undef HAVE_SYS_STREAM_H */
+
+/* Define if you have the <sys/time.h> header file. */
+#define HAVE_SYS_TIME_H 1
 
 /* Define if you have the <termcap.h> header file.  */
 //#define HAVE_TERMCAP_H 1
@@ -150,3 +153,10 @@
 #  endif
 #endif
 
+#define HAVE_TIMEVAL 1
+#define HAVE_GETTIMEOFDAY 1
+//#define HAVE_PSELECT 1
+#define HAVE_PWD_H 1
+#define NCURSES_VERSION 1
+#define COLOR_SUPPORT
+#define HAVE_FNMATCH 1

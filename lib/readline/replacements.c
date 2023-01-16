@@ -21,6 +21,7 @@ int tputs( const char *str, int affcnt, int (*putc)(int))
     {
         (*putc)(str[i]);
     }
+    return 0;
 }
 
 char *tgoto( const char* cap, int col, int row )
@@ -70,4 +71,10 @@ int tgetent( char *bp, const char *name )
 {
     LOGd(_DEBUG,"tgetent: %s, %s\n", bp, name);
     return 0;
+}
+
+//unsigned int alarm(unsigned int seconds) __attribute__((visibility("hidden")));
+unsigned int __attribute__((visibility("hidden"))) alarm(unsigned int seconds)
+{
+  return 0;
 }

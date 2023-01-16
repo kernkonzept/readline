@@ -1,23 +1,23 @@
 /* posixstat.h -- Posix stat(2) definitions for systems that
    don't have them. */
 
-/* Copyright (C) 1987,1991 Free Software Foundation, Inc.
+/* Copyright (C) 1987-2019 Free Software Foundation, Inc.
 
    This file is part of GNU Bash, the Bourne Again SHell.
 
-   Bash is free software; you can redistribute it and/or modify it
-   under the terms of the GNU General Public License as published by
-   the Free Software Foundation; either version 2, or (at your option)
-   any later version.
+   Bash is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 3 of the License, or
+   (at your option) any later version.
 
-   Bash is distributed in the hope that it will be useful, but WITHOUT
-   ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
-   or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public
-   License for more details.
+   Bash is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
    You should have received a copy of the GNU General Public License
-   along with Bash; see the file COPYING.  If not, write to the Free
-   Software Foundation, 59 Temple Place, Suite 330, Boston, MA 02111 USA. */
+   along with Bash.  If not, see <http://www.gnu.org/licenses/>.
+*/
 
 /* This file should be included instead of <sys/stat.h>.
    It relies on the local sys/stat.h to work though. */
@@ -132,6 +132,26 @@
 #  define S_IRWXU	(S_IRUSR | S_IWUSR | S_IXUSR)
 #  define S_IRWXG	(S_IRGRP | S_IWGRP | S_IXGRP)
 #  define S_IRWXO	(S_IROTH | S_IWOTH | S_IXOTH)
+#else /* !S_IRWXU */
+  /* S_IRWXU is defined, but "group" and "other" bits might not be
+     (happens in certain versions of MinGW).  */
+#  if !defined (S_IRGRP)
+#    define S_IRGRP	(S_IREAD  >> 3)		/* read, group */
+#    define S_IWGRP	(S_IWRITE >> 3)		/* write, group */
+#    define S_IXGRP	(S_IEXEC  >> 3)		/* execute, group */
+#  endif /* !S_IRGRP */
+
+#  if !defined (S_IROTH)
+#    define S_IROTH	(S_IREAD  >> 6)		/* read, other */
+#    define S_IWOTH	(S_IWRITE >> 6)		/* write, other */
+#    define S_IXOTH	(S_IEXEC  >> 6)		/* execute, other */
+#  endif /* !S_IROTH */
+#  if !defined (S_IRWXG)
+#    define S_IRWXG	(S_IRGRP | S_IWGRP | S_IXGRP)
+#  endif
+#  if !defined (S_IRWXO)
+#    define S_IRWXO	(S_IROTH | S_IWOTH | S_IXOTH)
+#  endif
 #endif /* !S_IRWXU */
 
 /* These are non-standard, but are used in builtins.c$symbolic_umask() */

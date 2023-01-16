@@ -1,25 +1,25 @@
 /* rltty.c -- functions to prepare and restore the terminal for readline's
    use. */
 
-/* Copyright (C) 1992 Free Software Foundation, Inc.
+/* Copyright (C) 1992-2022 Free Software Foundation, Inc.
 
-   This file is part of the GNU Readline Library, a library for
-   reading lines of text with interactive input and history editing.
+   This file is part of the GNU Readline Library (Readline), a library
+   for reading lines of text with interactive input and history editing.
 
-   The GNU Readline Library is free software; you can redistribute it
-   and/or modify it under the terms of the GNU General Public License
-   as published by the Free Software Foundation; either version 2, or
+   Readline is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 3 of the License, or
    (at your option) any later version.
 
-   The GNU Readline Library is distributed in the hope that it will be
-   useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-   of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   Readline is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
    GNU General Public License for more details.
 
-   The GNU General Public License is often shipped with GNU software, and
-   is generally kept in a file called COPYING or LICENSE.  If you do not
-   have a copy of the license, write to the Free Software Foundation,
-   59 Temple Place, Suite 330, Boston, MA 02111 USA. */
+   You should have received a copy of the GNU General Public License
+   along with Readline.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 #define READLINE_LIBRARY
 
 #if defined (HAVE_CONFIG_H)
@@ -37,11 +37,11 @@
 
 #include "rldefs.h"
 
-#if defined (GWINSZ_IN_SYS_IOCTL)
-#  include <sys/ioctl.h>
-#endif /* GWINSZ_IN_SYS_IOCTL */
-
 #include "rltty.h"
+#if defined (HAVE_SYS_IOCTL_H)
+#  include <sys/ioctl.h>		/* include for declaration of ioctl */
+#endif
+
 #include "readline.h"
 #include "rlprivate.h"
 
@@ -49,72 +49,10 @@
 extern int errno;
 #endif /* !errno */
 
-VFunction *rl_prep_term_function = rl_prep_terminal;
-VFunction *rl_deprep_term_function = rl_deprep_terminal;
+rl_vintfunc_t *rl_prep_term_function = rl_prep_terminal;
+rl_voidfunc_t *rl_deprep_term_function = rl_deprep_terminal;
 
-/* **************************************************************** */
-/*								    */
-/*			   Signal Management			    */
-/*								    */
-/* **************************************************************** */
-
-#if defined (HAVE_POSIX_SIGNALS)
-static sigset_t sigint_set, sigint_oset;
-#else /* !HAVE_POSIX_SIGNALS */
-#  if defined (HAVE_BSD_SIGNALS)
-static int sigint_oldmask;
-#  endif /* HAVE_BSD_SIGNALS */
-#endif /* !HAVE_POSIX_SIGNALS */
-
-static int sigint_blocked;
-
-/* Cause SIGINT to not be delivered until the corresponding call to
-   release_sigint(). */
-static void
-block_sigint ()
-{
-  if (sigint_blocked)
-    return;
-
-#if defined (HAVE_POSIX_SIGNALS)
-  sigemptyset (&sigint_set);
-  sigemptyset (&sigint_oset);
-  sigaddset (&sigint_set, SIGINT);
-  sigprocmask (SIG_BLOCK, &sigint_set, &sigint_oset);
-#else /* !HAVE_POSIX_SIGNALS */
-#  if defined (HAVE_BSD_SIGNALS)
-  sigint_oldmask = sigblock (sigmask (SIGINT));
-#  else /* !HAVE_BSD_SIGNALS */
-#    if defined (HAVE_USG_SIGHOLD)
-  sighold (SIGINT);
-#    endif /* HAVE_USG_SIGHOLD */
-#  endif /* !HAVE_BSD_SIGNALS */
-#endif /* !HAVE_POSIX_SIGNALS */
-
-  sigint_blocked = 1;
-}
-
-/* Allow SIGINT to be delivered. */
-static void
-release_sigint ()
-{
-  if (sigint_blocked == 0)
-    return;
-
-#if defined (HAVE_POSIX_SIGNALS)
-  sigprocmask (SIG_SETMASK, &sigint_oset, (sigset_t *)NULL);
-#else
-#  if defined (HAVE_BSD_SIGNALS)
-  sigsetmask (sigint_oldmask);
-#  else /* !HAVE_BSD_SIGNALS */
-#    if defined (HAVE_USG_SIGHOLD)
-  sigrelse (SIGINT);
-#    endif /* HAVE_USG_SIGHOLD */
-#  endif /* !HAVE_BSD_SIGNALS */
-#endif /* !HAVE_POSIX_SIGNALS */
-
-  sigint_blocked = 0;
-}
+static void set_winsize (int);
 
 /* **************************************************************** */
 /*								    */
@@ -122,7 +60,13 @@ release_sigint ()
 /*								    */
 /* **************************************************************** */
 
-/* Non-zero means that the terminal is in a prepped state. */
+/* Non-zero means that the terminal is in a prepped state.  There are several
+   flags that are OR'd in to denote whether or not we have sent various
+   init strings to the terminal. */
+#define TPX_PREPPED	0x01
+#define TPX_BRACKPASTE	0x02
+#define TPX_METAKEY	0x04
+
 static int terminal_prepped;
 
 static _RL_TTY_CHARS _rl_tty_chars, _rl_last_tty_chars;
@@ -147,7 +91,9 @@ set_winsize (tty)
 #endif /* TIOCGWINSZ */
 }
 
-#if defined (NEW_TTY_DRIVER)
+#if defined (NO_TTY_DRIVER)
+/* Nothing */
+#elif defined (NEW_TTY_DRIVER)
 
 /* Values for the `flags' field of a struct bsdtty.  This tells which
    elements of the struct bsdtty have been fetched from the system and
@@ -173,9 +119,18 @@ struct bsdtty {
 
 static TIOTYPE otio;
 
+static void save_tty_chars (TIOTYPE *);
+static int _get_tty_settings (int, TIOTYPE *);
+static int get_tty_settings (int, TIOTYPE *);
+static int _set_tty_settings (int, TIOTYPE *);
+static int set_tty_settings (int, TIOTYPE *);
+
+static void prepare_terminal_settings (int, TIOTYPE, TIOTYPE *);
+
+static void set_special_char (Keymap, TIOTYPE *, int, rl_command_func_t *);
+
 static void
-save_tty_chars (tiop)
-     TIOTYPE *tiop;
+save_tty_chars (TIOTYPE *tiop)
 {
   _rl_last_tty_chars = _rl_tty_chars;
 
@@ -187,8 +142,9 @@ save_tty_chars (tiop)
 
   if (tiop->flags & TCHARS_SET)
     {
-      _rl_tty_chars.t_intr = tiop->tchars.t_intrc;
-      _rl_tty_chars.t_quit = tiop->tchars.t_quitc;
+      _rl_intr_char = _rl_tty_chars.t_intr = tiop->tchars.t_intrc;
+      _rl_quit_char = _rl_tty_chars.t_quit = tiop->tchars.t_quitc;
+
       _rl_tty_chars.t_start = tiop->tchars.t_startc;
       _rl_tty_chars.t_stop = tiop->tchars.t_stopc;
       _rl_tty_chars.t_eof = tiop->tchars.t_eofc;
@@ -198,7 +154,8 @@ save_tty_chars (tiop)
 
   if (tiop->flags & LTCHARS_SET)
     {
-      _rl_tty_chars.t_susp = tiop->ltchars.t_suspc;
+      _rl_susp_char = _rl_tty_chars.t_susp = tiop->ltchars.t_suspc;
+
       _rl_tty_chars.t_dsusp = tiop->ltchars.t_dsuspc;
       _rl_tty_chars.t_reprint = tiop->ltchars.t_rprntc;
       _rl_tty_chars.t_flush = tiop->ltchars.t_flushc;
@@ -210,46 +167,44 @@ save_tty_chars (tiop)
 }
 
 static int
-get_tty_settings (tty, tiop)
-     int tty;
-     TIOTYPE *tiop;
+get_tty_settings (int tty, TIOTYPE *tiop)
 {
   set_winsize (tty);
 
   tiop->flags = tiop->lflag = 0;
 
-  ioctl (tty, TIOCGETP, &(tiop->sgttyb));
+  errno = 0;
+  if (ioctl (tty, TIOCGETP, &(tiop->sgttyb)) < 0)
+    return -1;
   tiop->flags |= SGTTY_SET;
 
 #if defined (TIOCLGET)
-  ioctl (tty, TIOCLGET, &(tiop->lflag));
-  tiop->flags |= LFLAG_SET;
+  if (ioctl (tty, TIOCLGET, &(tiop->lflag)) == 0)
+    tiop->flags |= LFLAG_SET;
 #endif
 
 #if defined (TIOCGETC)
-  ioctl (tty, TIOCGETC, &(tiop->tchars));
-  tiop->flags |= TCHARS_SET;
+  if (ioctl (tty, TIOCGETC, &(tiop->tchars)) == 0)
+    tiop->flags |= TCHARS_SET;
 #endif
 
 #if defined (TIOCGLTC)
-  ioctl (tty, TIOCGLTC, &(tiop->ltchars));
-  tiop->flags |= LTCHARS_SET;
+  if (ioctl (tty, TIOCGLTC, &(tiop->ltchars)) == 0)
+    tiop->flags |= LTCHARS_SET;
 #endif
 
   return 0;
 }
 
 static int
-set_tty_settings (tty, tiop)
-     int tty;
-     TIOTYPE *tiop;
+set_tty_settings (int tty, TIOTYPE *tiop)
 {
   if (tiop->flags & SGTTY_SET)
     {
       ioctl (tty, TIOCSETN, &(tiop->sgttyb));
       tiop->flags &= ~SGTTY_SET;
     }
-  readline_echoing_p = 1;
+  _rl_echoing_p = 1;
 
 #if defined (TIOCLSET)
   if (tiop->flags & LFLAG_SET)
@@ -279,23 +234,22 @@ set_tty_settings (tty, tiop)
 }
 
 static void
-prepare_terminal_settings (meta_flag, otio, tiop)
-     int meta_flag;
-     TIOTYPE otio, *tiop;
+prepare_terminal_settings (int meta_flag, TIOTYPE oldtio, TIOTYPE *tiop)
 {
-  readline_echoing_p = (otio.sgttyb.sg_flags & ECHO);
+  _rl_echoing_p = (oldtio.sgttyb.sg_flags & ECHO);
+  _rl_echoctl = (oldtio.sgttyb.sg_flags & ECHOCTL);
 
   /* Copy the original settings to the structure we're going to use for
      our settings. */
-  tiop->sgttyb = otio.sgttyb;
-  tiop->lflag = otio.lflag;
+  tiop->sgttyb = oldtio.sgttyb;
+  tiop->lflag = oldtio.lflag;
 #if defined (TIOCGETC)
-  tiop->tchars = otio.tchars;
+  tiop->tchars = oldtio.tchars;
 #endif
 #if defined (TIOCGLTC)
-  tiop->ltchars = otio.ltchars;
+  tiop->ltchars = oldtio.ltchars;
 #endif
-  tiop->flags = otio.flags;
+  tiop->flags = oldtio.flags;
 
   /* First, the basic settings to put us into character-at-a-time, no-echo
      input mode. */
@@ -308,8 +262,8 @@ prepare_terminal_settings (meta_flag, otio, tiop)
 #if !defined (ANYP)
 #  define ANYP (EVENP | ODDP)
 #endif
-  if (((otio.sgttyb.sg_flags & ANYP) == ANYP) ||
-      ((otio.sgttyb.sg_flags & ANYP) == 0))
+  if (((oldtio.sgttyb.sg_flags & ANYP) == ANYP) ||
+      ((oldtio.sgttyb.sg_flags & ANYP) == 0))
     {
       tiop->sgttyb.sg_flags |= ANYP;
 
@@ -328,13 +282,13 @@ prepare_terminal_settings (meta_flag, otio, tiop)
   tiop->tchars.t_startc = -1; /* C-q */
 
   /* If there is an XON character, bind it to restart the output. */
-  if (otio.tchars.t_startc != -1)
-    rl_bind_key (otio.tchars.t_startc, rl_restart_output);
+  if (oldtio.tchars.t_startc != -1)
+    rl_bind_key (oldtio.tchars.t_startc, rl_restart_output);
 #  endif /* USE_XON_XOFF */
 
   /* If there is an EOF char, bind _rl_eof_char to it. */
-  if (otio.tchars.t_eofc != -1)
-    _rl_eof_char = otio.tchars.t_eofc;
+  if (oldtio.tchars.t_eofc != -1)
+    _rl_eof_char = oldtio.tchars.t_eofc;
 
 #  if defined (NO_KILL_INTR)
   /* Get rid of terminal-generated SIGQUIT and SIGINT. */
@@ -373,10 +327,21 @@ prepare_terminal_settings (meta_flag, otio, tiop)
 #  define TIOTYPE struct termio
 #  define DRAIN_OUTPUT(fd)
 #  define GETATTR(tty, tiop)	(ioctl (tty, TCGETA, tiop))
-#  define SETATTR(tty, tiop)	(ioctl (tty, TCSETA, tiop))
+#  define SETATTR(tty, tiop)	(ioctl (tty, TCSETAW, tiop))
 #endif /* !TERMIOS_TTY_DRIVER */
 
 static TIOTYPE otio;
+
+static void save_tty_chars (TIOTYPE *);
+static int _get_tty_settings (int, TIOTYPE *);
+static int get_tty_settings (int, TIOTYPE *);
+static int _set_tty_settings (int, TIOTYPE *);
+static int set_tty_settings (int, TIOTYPE *);
+
+static void prepare_terminal_settings (int, TIOTYPE, TIOTYPE *);
+
+static void set_special_char (Keymap, TIOTYPE *, int, rl_command_func_t *);
+static void _rl_bind_tty_special_chars (Keymap, TIOTYPE);
 
 #if defined (FLUSHO)
 #  define OUTPUT_BEING_FLUSHED(tp)  (tp->c_lflag & FLUSHO)
@@ -385,8 +350,7 @@ static TIOTYPE otio;
 #endif
 
 static void
-save_tty_chars (tiop)
-     TIOTYPE *tiop;
+save_tty_chars (TIOTYPE *tiop)
 {
   _rl_last_tty_chars = _rl_tty_chars;
 
@@ -403,10 +367,10 @@ save_tty_chars (tiop)
 #ifdef VREPRINT
   _rl_tty_chars.t_reprint = tiop->c_cc[VREPRINT];
 #endif
-  _rl_tty_chars.t_intr = tiop->c_cc[VINTR];
-  _rl_tty_chars.t_quit = tiop->c_cc[VQUIT];
+  _rl_intr_char = _rl_tty_chars.t_intr = tiop->c_cc[VINTR];
+  _rl_quit_char = _rl_tty_chars.t_quit = tiop->c_cc[VQUIT];
 #ifdef VSUSP
-  _rl_tty_chars.t_susp = tiop->c_cc[VSUSP];
+  _rl_susp_char = _rl_tty_chars.t_susp = tiop->c_cc[VSUSP];
 #endif
 #ifdef VDSUSP
   _rl_tty_chars.t_dsusp = tiop->c_cc[VDSUSP];
@@ -431,30 +395,26 @@ save_tty_chars (tiop)
 #if defined (_AIX) || defined (_AIX41)
 /* Currently this is only used on AIX */
 static void
-rltty_warning (msg)
-     char *msg;
+rltty_warning (char *msg)
 {
-  fprintf (stderr, "readline: warning: %s\n", msg);
+  _rl_errmsg ("warning: %s", msg);
 }
 #endif
 
 #if defined (_AIX)
 void
-setopost(tp)
-TIOTYPE *tp;
+setopost (TIOTYPE *tp)
 {
   if ((tp->c_oflag & OPOST) == 0)
     {
-      rltty_warning ("turning on OPOST for terminal\r");
+      _rl_errmsg ("warning: turning on OPOST for terminal\r");
       tp->c_oflag |= OPOST|ONLCR;
     }
 }
 #endif
 
 static int
-_get_tty_settings (tty, tiop)
-     int tty;
-     TIOTYPE *tiop;
+_get_tty_settings (int tty, TIOTYPE *tiop)
 {
   int ioctl_ret;
 
@@ -470,8 +430,8 @@ _get_tty_settings (tty, tiop)
 	}
       if (OUTPUT_BEING_FLUSHED (tiop))
 	{
-#if defined (FLUSHO) && defined (_AIX41)
-	  rltty_warning ("turning off output flushing");
+#if defined (FLUSHO)
+	  _rl_errmsg ("warning: turning off output flushing");
 	  tiop->c_lflag &= ~FLUSHO;
 	  break;
 #else
@@ -485,12 +445,11 @@ _get_tty_settings (tty, tiop)
 }
 
 static int
-get_tty_settings (tty, tiop)
-     int tty;
-     TIOTYPE *tiop;
+get_tty_settings (int tty, TIOTYPE *tiop)
 {
   set_winsize (tty);
 
+  errno = 0;
   if (_get_tty_settings (tty, tiop) < 0)
     return -1;
 
@@ -502,9 +461,7 @@ get_tty_settings (tty, tiop)
 }
 
 static int
-_set_tty_settings (tty, tiop)
-     int tty;
-     TIOTYPE *tiop;
+_set_tty_settings (int tty, TIOTYPE *tiop)
 {
   while (SETATTR (tty, tiop) < 0)
     {
@@ -516,9 +473,7 @@ _set_tty_settings (tty, tiop)
 }
 
 static int
-set_tty_settings (tty, tiop)
-     int tty;
-     TIOTYPE *tiop;
+set_tty_settings (int tty, TIOTYPE *tiop)
 {
   if (_set_tty_settings (tty, tiop) < 0)
     return -1;
@@ -545,23 +500,27 @@ set_tty_settings (tty, tiop)
 }
 
 static void
-prepare_terminal_settings (meta_flag, otio, tiop)
-     int meta_flag;
-     TIOTYPE otio, *tiop;
+prepare_terminal_settings (int meta_flag, TIOTYPE oldtio, TIOTYPE *tiop)
 {
-  readline_echoing_p = (otio.c_lflag & ECHO);
+  int sc;
+  Keymap kmap;
+
+  _rl_echoing_p = (oldtio.c_lflag & ECHO);
+#if defined (ECHOCTL)
+  _rl_echoctl = (oldtio.c_lflag & ECHOCTL);
+#endif
 
   tiop->c_lflag &= ~(ICANON | ECHO);
 
-  if ((unsigned char) otio.c_cc[VEOF] != (unsigned char) _POSIX_VDISABLE)
-    _rl_eof_char = otio.c_cc[VEOF];
+  if ((unsigned char) oldtio.c_cc[VEOF] != (unsigned char) _POSIX_VDISABLE)
+    _rl_eof_char = oldtio.c_cc[VEOF];
 
 #if defined (USE_XON_XOFF)
 #if defined (IXANY)
-  tiop->c_iflag &= ~(IXON | IXOFF | IXANY);
+  tiop->c_iflag &= ~(IXON | IXANY);
 #else
   /* `strict' Posix systems do not define IXANY. */
-  tiop->c_iflag &= ~(IXON | IXOFF);
+  tiop->c_iflag &= ~IXON;
 #endif /* IXANY */
 #endif /* USE_XON_XOFF */
 
@@ -585,7 +544,7 @@ prepare_terminal_settings (meta_flag, otio, tiop)
   if (OUTPUT_BEING_FLUSHED (tiop))
     {
       tiop->c_lflag &= ~FLUSHO;
-      otio.c_lflag &= ~FLUSHO;
+      oldtio.c_lflag &= ~FLUSHO;
     }
 #endif
 
@@ -602,66 +561,144 @@ prepare_terminal_settings (meta_flag, otio, tiop)
   tiop->c_cc[VDSUSP] = _POSIX_VDISABLE;
 #endif
 
+  /* Conditionally disable some other tty special characters if there is a
+     key binding for them in the current keymap.  Readline ordinarily doesn't
+     bind these characters, but an application or user might. */
+#if defined (VI_MODE)
+      kmap = (rl_editing_mode == vi_mode) ? vi_insertion_keymap : _rl_keymap;
+#else
+      kmap = _rl_keymap;
+#endif
+#if defined (VDISCARD)
+  sc = tiop->c_cc[VDISCARD];
+  if (sc != _POSIX_VDISABLE && kmap[(unsigned char)sc].type == ISFUNC)
+    tiop->c_cc[VDISCARD] = _POSIX_VDISABLE;
+#endif /* VDISCARD */
+
 #endif /* TERMIOS_TTY_DRIVER && _POSIX_VDISABLE */
 }
-#endif  /* NEW_TTY_DRIVER */
+#endif  /* !NEW_TTY_DRIVER */
 
 /* Put the terminal in CBREAK mode so that we can detect key presses. */
+#if defined (NO_TTY_DRIVER)
 void
-rl_prep_terminal (meta_flag)
-     int meta_flag;
+rl_prep_terminal (int meta_flag)
 {
-  int tty;
+  _rl_echoing_p = 1;
+}
+
+void
+rl_deprep_terminal (void)
+{
+}
+
+#else /* ! NO_TTY_DRIVER */
+void
+rl_prep_terminal (int meta_flag)
+{
+  int tty, nprep;
   TIOTYPE tio;
 
   if (terminal_prepped)
     return;
 
   /* Try to keep this function from being INTerrupted. */
-  block_sigint ();
+  _rl_block_sigint ();
 
-  tty = fileno (rl_instream);
+  tty = rl_instream ? fileno (rl_instream) : fileno (stdin);
 
   if (get_tty_settings (tty, &tio) < 0)
     {
-      release_sigint ();
+#if defined (ENOTSUP)
+      /* MacOS X and Linux, at least, lie about the value of errno if
+	 tcgetattr fails. */
+      if (errno == ENOTTY || errno == EINVAL || errno == ENOTSUP)
+#else
+      if (errno == ENOTTY || errno == EINVAL)
+#endif
+	_rl_echoing_p = 1;		/* XXX */
+
+      _rl_release_sigint ();
       return;
     }
 
   otio = tio;
 
+  if (_rl_bind_stty_chars)
+    {
+#if defined (VI_MODE)
+      /* If editing in vi mode, make sure we restore the bindings in the
+	 insertion keymap no matter what keymap we ended up in. */
+      if (rl_editing_mode == vi_mode)
+	rl_tty_unset_default_bindings (vi_insertion_keymap);
+      else
+#endif
+	rl_tty_unset_default_bindings (_rl_keymap);
+    }
   save_tty_chars (&otio);
+  RL_SETSTATE(RL_STATE_TTYCSAVED);
+  if (_rl_bind_stty_chars)
+    {
+#if defined (VI_MODE)
+      /* If editing in vi mode, make sure we set the bindings in the
+	 insertion keymap no matter what keymap we ended up in. */
+      if (rl_editing_mode == vi_mode)
+	_rl_bind_tty_special_chars (vi_insertion_keymap, tio);
+      else
+#endif
+	_rl_bind_tty_special_chars (_rl_keymap, tio);
+    }
 
   prepare_terminal_settings (meta_flag, otio, &tio);
 
   if (set_tty_settings (tty, &tio) < 0)
     {
-      release_sigint ();
+      _rl_release_sigint ();
       return;
     }
 
   if (_rl_enable_keypad)
     _rl_control_keypad (1);
 
-  fflush (rl_outstream);
-  terminal_prepped = 1;
+  nprep = TPX_PREPPED;
 
-  release_sigint ();
+  if (_rl_enable_bracketed_paste)
+    {
+      fprintf (rl_outstream, BRACK_PASTE_INIT);
+      nprep |= TPX_BRACKPASTE;
+    }
+
+  fflush (rl_outstream);
+  terminal_prepped = nprep;
+  RL_SETSTATE(RL_STATE_TERMPREPPED);
+
+  _rl_release_sigint ();
 }
 
 /* Restore the terminal's normal settings and modes. */
 void
-rl_deprep_terminal ()
+rl_deprep_terminal (void)
 {
   int tty;
 
-  if (!terminal_prepped)
+  if (terminal_prepped == 0)
     return;
 
   /* Try to keep this function from being interrupted. */
-  block_sigint ();
+  _rl_block_sigint ();
 
-  tty = fileno (rl_instream);
+  tty = rl_instream ? fileno (rl_instream) : fileno (stdin);
+
+  if (terminal_prepped & TPX_BRACKPASTE)
+    {
+      fprintf (rl_outstream, BRACK_PASTE_FINI);
+      /* Since the last character in BRACK_PASTE_FINI is \r */
+      _rl_last_c_pos = 0;
+      if (rl_eof_found && (RL_ISSTATE (RL_STATE_TIMEOUT) == 0))
+ 	fprintf (rl_outstream, "\n");
+      else if (_rl_echoing_p == 0)
+ 	fprintf (rl_outstream, "\n");
+    }
 
   if (_rl_enable_keypad)
     _rl_control_keypad (0);
@@ -670,13 +707,27 @@ rl_deprep_terminal ()
 
   if (set_tty_settings (tty, &otio) < 0)
     {
-      release_sigint ();
+      _rl_release_sigint ();
       return;
     }
 
   terminal_prepped = 0;
+  RL_UNSETSTATE(RL_STATE_TERMPREPPED);
 
-  release_sigint ();
+  _rl_release_sigint ();
+}
+#endif /* !NO_TTY_DRIVER */
+
+/* Set readline's idea of whether or not it is echoing output to the terminal,
+   returning the old value. */
+int
+rl_tty_set_echoing (int u)
+{
+  int o;
+
+  o = _rl_echoing_p;
+  _rl_echoing_p = u;
+  return o;
 }
 
 /* **************************************************************** */
@@ -686,9 +737,12 @@ rl_deprep_terminal ()
 /* **************************************************************** */
 
 int
-rl_restart_output (count, key)
-     int count, key;
+rl_restart_output (int count, int key)
 {
+#if defined (__MINGW32__)
+  return 0;
+#else /* !__MING32__ */
+
   int fildes = fileno (rl_outstream);
 #if defined (TIOCSTART)
 #if defined (apollo)
@@ -716,12 +770,16 @@ rl_restart_output (count, key)
 #endif /* !TIOCSTART */
 
   return 0;
+#endif /* !__MINGW32__ */
 }
 
 int
-rl_stop_output (count, key)
-     int count, key;
+rl_stop_output (int count, int key)
 {
+#if defined (__MINGW32__)
+  return 0;
+#else
+
   int fildes = fileno (rl_instream);
 
 #if defined (TIOCSTOP)
@@ -744,6 +802,7 @@ rl_stop_output (count, key)
 #endif /* !TIOCSTOP */
 
   return 0;
+#endif /* !__MINGW32__ */
 }
 
 /* **************************************************************** */
@@ -751,81 +810,142 @@ rl_stop_output (count, key)
 /*			Default Key Bindings			    */
 /*								    */
 /* **************************************************************** */
-void
-rltty_set_default_bindings (kmap)
-     Keymap kmap;
+
+#if !defined (NO_TTY_DRIVER)
+#define SET_SPECIAL(sc, func)	set_special_char(kmap, &ttybuff, sc, func)
+#endif
+
+#if defined (NO_TTY_DRIVER)
+
+#define SET_SPECIAL(sc, func)
+#define RESET_SPECIAL(c)
+
+#elif defined (NEW_TTY_DRIVER)
+static void
+set_special_char (Keymap kmap, TIOTYPE *tiop, int sc, rl_command_func_t *func)
 {
-  TIOTYPE ttybuff;
-  int tty = fileno (rl_instream);
+  if (sc != -1 && kmap[(unsigned char)sc].type == ISFUNC)
+    kmap[(unsigned char)sc].function = func;
+}
 
-#if defined (NEW_TTY_DRIVER)
+#define RESET_SPECIAL(c) \
+  if (c != -1 && kmap[(unsigned char)c].type == ISFUNC) \
+    kmap[(unsigned char)c].function = rl_insert;
 
-#define SET_SPECIAL(sc, func) \
-  do \
-    { \
-      int ic; \
-      ic = sc; \
-      if (ic != -1 && kmap[ic].type == ISFUNC) \
-	kmap[ic].function = func; \
-    } \
-  while (0)
-
-  if (get_tty_settings (tty, &ttybuff) == 0)
+static void
+_rl_bind_tty_special_chars (Keymap kmap, TIOTYPE ttybuff)
+{
+  if (ttybuff.flags & SGTTY_SET)
     {
-      if (ttybuff.flags & SGTTY_SET)
-	{
-	  SET_SPECIAL (ttybuff.sgttyb.sg_erase, rl_rubout);
-	  SET_SPECIAL (ttybuff.sgttyb.sg_kill, rl_unix_line_discard);
-	}
-
-#  if defined (TIOCGLTC)
-      if (ttybuff.flags & LTCHARS_SET)
-	{
-	  SET_SPECIAL (ttybuff.ltchars.t_werasc, rl_unix_word_rubout);
-	  SET_SPECIAL (ttybuff.ltchars.t_lnextc, rl_quoted_insert);
-	}
-#  endif /* TIOCGLTC */
+      SET_SPECIAL (ttybuff.sgttyb.sg_erase, rl_rubout);
+      SET_SPECIAL (ttybuff.sgttyb.sg_kill, rl_unix_line_discard);
     }
 
-#else /* !NEW_TTY_DRIVER */
-
-#define SET_SPECIAL(sc, func) \
-  do \
-    { \
-      unsigned char uc; \
-      uc = ttybuff.c_cc[sc]; \
-      if (uc != (unsigned char)_POSIX_VDISABLE && kmap[uc].type == ISFUNC) \
-	kmap[uc].function = func; \
-    } \
-  while (0)
-
-  if (get_tty_settings (tty, &ttybuff) == 0)
+#  if defined (TIOCGLTC)
+  if (ttybuff.flags & LTCHARS_SET)
     {
-      SET_SPECIAL (VERASE, rl_rubout);
-      SET_SPECIAL (VKILL, rl_unix_line_discard);
+      SET_SPECIAL (ttybuff.ltchars.t_werasc, rl_unix_word_rubout);
+      SET_SPECIAL (ttybuff.ltchars.t_lnextc, rl_quoted_insert);
+    }
+#  endif /* TIOCGLTC */
+}
+
+#else /* !NEW_TTY_DRIVER */
+static void
+set_special_char (Keymap kmap, TIOTYPE *tiop, int sc, rl_command_func_t *func)
+{
+  unsigned char uc;
+
+  uc = tiop->c_cc[sc];
+  if (uc != (unsigned char)_POSIX_VDISABLE && kmap[uc].type == ISFUNC)
+    kmap[uc].function = func;
+}
+
+/* used later */
+#define RESET_SPECIAL(uc) \
+  if (uc != (unsigned char)_POSIX_VDISABLE && kmap[uc].type == ISFUNC) \
+    kmap[uc].function = rl_insert;
+
+static void
+_rl_bind_tty_special_chars (Keymap kmap, TIOTYPE ttybuff)
+{
+  SET_SPECIAL (VERASE, rl_rubout);
+  SET_SPECIAL (VKILL, rl_unix_line_discard);
 
 #  if defined (VLNEXT) && defined (TERMIOS_TTY_DRIVER)
-      SET_SPECIAL (VLNEXT, rl_quoted_insert);
+  SET_SPECIAL (VLNEXT, rl_quoted_insert);
 #  endif /* VLNEXT && TERMIOS_TTY_DRIVER */
 
 #  if defined (VWERASE) && defined (TERMIOS_TTY_DRIVER)
-      SET_SPECIAL (VWERASE, rl_unix_word_rubout);
+#    if defined (VI_MODE)
+  if (rl_editing_mode == vi_mode)
+    SET_SPECIAL (VWERASE, rl_vi_unix_word_rubout);
+  else
+#    endif
+  SET_SPECIAL (VWERASE, rl_unix_word_rubout);
 #  endif /* VWERASE && TERMIOS_TTY_DRIVER */
-    }
+}
+
 #endif /* !NEW_TTY_DRIVER */
+
+/* Set the system's default editing characters to their readline equivalents
+   in KMAP.  Should be static, now that we have rl_tty_set_default_bindings. */
+void
+rltty_set_default_bindings (Keymap kmap)
+{
+#if !defined (NO_TTY_DRIVER)
+  TIOTYPE ttybuff;
+  int tty;
+
+  tty = fileno (rl_instream);
+
+  if (get_tty_settings (tty, &ttybuff) == 0)
+    _rl_bind_tty_special_chars (kmap, ttybuff);
+#endif
+}
+
+/* New public way to set the system default editing chars to their readline
+   equivalents. */
+void
+rl_tty_set_default_bindings (Keymap kmap)
+{
+  rltty_set_default_bindings (kmap);
+}
+
+/* Rebind all of the tty special chars that readline worries about back
+   to self-insert.  Call this before saving the current terminal special
+   chars with save_tty_chars().  This only works on POSIX termios or termio
+   systems. */
+void
+rl_tty_unset_default_bindings (Keymap kmap)
+{
+  /* Don't bother before we've saved the tty special chars at least once. */
+  if (RL_ISSTATE(RL_STATE_TTYCSAVED) == 0)
+    return;
+
+  RESET_SPECIAL (_rl_tty_chars.t_erase);
+  RESET_SPECIAL (_rl_tty_chars.t_kill);
+
+#  if defined (VLNEXT) && defined (TERMIOS_TTY_DRIVER)
+  RESET_SPECIAL (_rl_tty_chars.t_lnext);
+#  endif /* VLNEXT && TERMIOS_TTY_DRIVER */
+
+#  if defined (VWERASE) && defined (TERMIOS_TTY_DRIVER)
+  RESET_SPECIAL (_rl_tty_chars.t_werase);
+#  endif /* VWERASE && TERMIOS_TTY_DRIVER */
 }
 
 #if defined (HANDLE_SIGNALS)
 
-#if defined (NEW_TTY_DRIVER)
+#if defined (NEW_TTY_DRIVER) || defined (NO_TTY_DRIVER)
 int
-_rl_disable_tty_signals ()
+_rl_disable_tty_signals (void)
 {
   return 0;
 }
 
 int
-_rl_restore_tty_signals ()
+_rl_restore_tty_signals (void)
 {
   return 0;
 }
@@ -835,7 +955,7 @@ static TIOTYPE sigstty, nosigstty;
 static int tty_sigs_disabled = 0;
 
 int
-_rl_disable_tty_signals ()
+_rl_disable_tty_signals (void)
 {
   if (tty_sigs_disabled)
     return 0;
@@ -846,6 +966,7 @@ _rl_disable_tty_signals ()
   nosigstty = sigstty;
 
   nosigstty.c_lflag &= ~ISIG;
+  nosigstty.c_iflag &= ~IXON;
 
   if (_set_tty_settings (fileno (rl_instream), &nosigstty) < 0)
     return (_set_tty_settings (fileno (rl_instream), &sigstty));
@@ -855,12 +976,19 @@ _rl_disable_tty_signals ()
 }
 
 int
-_rl_restore_tty_signals ()
+_rl_restore_tty_signals (void)
 {
+  int r;
+
   if (tty_sigs_disabled == 0)
     return 0;
 
-  return (_set_tty_settings (fileno (rl_instream), &sigstty));
+  r = _set_tty_settings (fileno (rl_instream), &sigstty);
+
+  if (r == 0)
+    tty_sigs_disabled = 0;
+
+  return r;
 }
 #endif /* !NEW_TTY_DRIVER */
 
