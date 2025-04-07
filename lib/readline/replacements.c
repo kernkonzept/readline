@@ -31,7 +31,7 @@ char *tgoto( const char* cap, int col, int row )
     return goto_string;
 }
 
-int tgetflag( char *id )
+int tgetflag( const char *id )
 {
     LOGd(_DEBUG,"tgetflag: %s\n", id);
     return 0;
@@ -43,13 +43,13 @@ int tcflow( int fd, int action )
     return 0;
 }
 
-int tgetnum( char *id )
+int tgetnum( const char *id )
 {
     LOGd(_DEBUG,"tgetnum: %s\n", id);
     return 0;
 }
 
-char *tgetstr( char *id, char **area )
+char *tgetstr( const char *id, char **area )
 {
     char *ret;
 

@@ -1,7 +1,7 @@
 Basic Installation
 ==================
 
-These are installation instructions for Readline-8.2.
+These are installation instructions for Readline.
 
 The simplest way to compile readline is:
 
@@ -14,12 +14,17 @@ The simplest way to compile readline is:
      Running `configure' takes some time.  While running, it prints some
      messages telling which features it is checking for.
 
+     If you want to build readline in a directory other than the source
+     directory, just run `configure' using a full pathname, for instance:
+
+		bash /usr/local/src/readline/readline-8.3/configure
+
   2. Type `make' to compile readline and build the static readline
-     and history libraries.  If supported, the shared readline and history
-     libraries will be built also.  See below for instructions on compiling
-     the other parts of the distribution.  Typing `make everything' will
-     cause the static and shared libraries (if supported) and the example
-     programs to be built.
+     and history libraries. If supported, this will build the shared
+     readline and history libraries also. See below for instructions on
+     compiling the other parts of the distribution. Typing `make everything'
+     will build the static and shared libraries (if supported) and the
+     example programs.
 
   3. Type `make install' to install the static readline and history
      libraries, the readline include files, the documentation, and, if

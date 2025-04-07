@@ -24,11 +24,11 @@ HISTFILES   = history.c histfile.c histexpand.c histsearch.c xmalloc.c \
 
 SRC_C_libhistory.a  = $(HISTFILES)
 SRC_C_libreadline.a = readline.c funmap.c keymaps.c vi_mode.c parens.c bind.c \
-                      isearch.c display.c emacs_keymap.c vi_keymap.c util.c \
-                      kill.c undo.c macro.c input.c callback.c nls.c \
-                      savestring.c tilde.c complete.c $(HISTFILES) rltty.c \
-                      terminal.c signals.c search.c replacements.c text.c \
-                      misc.c mbutil.c colors.c parse-colors.c compat.c
+                      isearch.c display.c util.c kill.c undo.c macro.c input.c \
+                      callback.c nls.c savestring.c tilde.c complete.c \
+                      $(HISTFILES) rltty.c terminal.c signals.c search.c \
+                      replacements.c text.c misc.c mbutil.c colors.c \
+                      parse-colors.c compat.c
 
 include $(L4DIR)/mk/lib.mk
 

@@ -211,8 +211,12 @@ uninstall-unsupported:
 
 uninstall: uninstall-$(SHLIB_STATUS)
 
-clean mostlyclean:	force
+.PHONY: clean maintainer-clean distclean mostlyclean
+
+mostlyclean:	force
 	$(RM) $(SHARED_OBJ) $(SHARED_LIBS)
+
+clean: mostlyclean
 
 distclean maintainer-clean: clean
 	$(RM) Makefile
