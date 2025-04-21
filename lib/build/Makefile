@@ -1,14 +1,13 @@
-# vim:se ts=4:
 PKGDIR      ?= ../..
 L4DIR       ?= $(PKGDIR)/../..
 
-TARGET      = libhistory.a libreadline.a
+TARGET      = libhistory.a libhistory.so libreadline.a libreadline.so
 
 CONTRIB_INCDIR = readline
 
-PRIVATE_INCDIR = $(PKGDIR)/lib/readline             \
-                 $(PKGDIR)/include                  \
-                 $(PKGDIR)/lib/contrib/libreadline
+PRIVATE_INCDIR = $(PKGDIR)/lib/build   \
+                 $(PKGDIR)/include     \
+                 $(PKGDIR)/lib/contrib
 
 WARNINGS    = -Wno-missing-prototypes -Wno-parentheses
 
@@ -16,19 +15,21 @@ DEFINES     = -DHAVE_CONFIG_H -D__L4
 
 #DEBUG      = 1
 
-vpath %     $(PKGDIR)/lib/readline \
-            $(PKGDIR)/lib/contrib/libreadline
+vpath %     $(PKGDIR)/lib/build \
+            $(PKGDIR)/lib/contrib
 
 HISTFILES   = history.c histfile.c histexpand.c histsearch.c xmalloc.c \
               shell.c xfree.c
 
 SRC_C_libhistory.a  = $(HISTFILES)
+SRC_C_libhistory.so = $(HISTFILES)
 SRC_C_libreadline.a = readline.c funmap.c keymaps.c vi_mode.c parens.c bind.c \
                       isearch.c display.c util.c kill.c undo.c macro.c input.c \
                       callback.c nls.c savestring.c tilde.c complete.c \
                       $(HISTFILES) rltty.c terminal.c signals.c search.c \
                       replacements.c text.c misc.c mbutil.c colors.c \
                       parse-colors.c compat.c
+SRC_C_libreadline.so = $(SRC_C_libreadline.a)
 
 include $(L4DIR)/mk/lib.mk
 
@@ -37,4 +38,4 @@ include $(L4DIR)/mk/lib.mk
 # had to copy all .c files depending on posixselect.h to lib.
 CFLAGS += -Wno-error=implicit-function-declaration \
           -Wno-deprecated-non-prototype \
-          -include $(PKGDIR)/lib/readline/posixselect.h
+          -include $(PKGDIR)/lib/build/posixselect.h
