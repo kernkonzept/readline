@@ -23,6 +23,7 @@
 #define _CHARDEFS_H_
 
 #include <ctype.h>
+#include <limits.h>
 
 #if defined (HAVE_CONFIG_H)
 #  if defined (HAVE_STRING_H)
